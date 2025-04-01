@@ -21,15 +21,21 @@ import (
 )
 
 const (
-	// For logout purposes, keys match the IANA token hints
+	// The following consts are the keys where information is added to the gin context.
+	// e.g. to get the access token, use c.Get(AccessTokenKey).
+	// where appropriate, they match the IANA token hints
 	// https://www.iana.org/assignments/oauth-parameters/oauth-parameters.xml#token-type-hint
-	AccessTokenKey  = "access_token"
-	RefreshTokenKey = "refresh_token"
-	// not in iana token hints.
-	IDTokenKey = "id_token"
 
-	// These aren't tokens. These are just for convenience.
-	ClaimsKey  = "claims"
+	// c.Get(AccessTokenKey) -> string
+	AccessTokenKey = "access_token"
+	// c.Get(RefreshTokenKey) -> string
+	RefreshTokenKey = "refresh_token"
+	// c.Get(IDTokenKey) -> string
+	IDTokenKey = "id_token"
+	// Claims and Subject aren't tokens. They contain information pulled out of the ID token for convenience.
+	// c.Get(ClaimsKey) -> map[string]any
+	ClaimsKey = "claims"
+	// c.Get(SubjectKey) -> string
 	SubjectKey = "subject"
 )
 
