@@ -110,7 +110,6 @@ func NewOauthHandlers(
 	oauthPKCESecret,
 	oauthSessionName string,
 	oauthScopes []string) *OauthHandlers {
-
 	handlers := &OauthHandlers{
 		oidcProvider:      oidcProvider,
 		oauthClientID:     oauthClientID,
@@ -120,7 +119,6 @@ func NewOauthHandlers(
 		oauthSessionName:  oauthSessionName,
 		oauthScopes:       oauthScopes,
 	}
-
 	provider, err := oidc.NewProvider(context.Background(), handlers.oidcProvider)
 	if err != nil {
 		panic(err)
@@ -138,13 +136,11 @@ func NewOauthHandlers(
 		}
 	}
 	handlers.oauthLogoutUrl = oauthLogoutUrl
-
 	// Sometimes, there is a revocation endpoint. Sometimes.
 	// This endpoint can be used to revoke individual tokens.
 	if val, ok := claims["revocation_endpoint"].(string); ok {
 		handlers.oauthRevocationUrl = val
 	}
-
 	handlers.oauth2config = &oauth2.Config{
 		ClientID:     handlers.oauthClientID,
 		ClientSecret: handlers.oauthClientSecret,
@@ -152,7 +148,6 @@ func NewOauthHandlers(
 		RedirectURL:  handlers.oauthRedirectUrl,
 		Scopes:       append([]string{oidc.ScopeOpenID}, oauthScopes...),
 	}
-
 	handlers.verifier = provider.Verifier(&oidc.Config{
 		ClientID: handlers.oauth2config.ClientID,
 	})
@@ -207,7 +202,7 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 		PKCEPlain: pkcePlain,
 		CSRF:      csrf.String(),
 	}
-	stateStr, err := marshalOauthState(state, h.oauthPKCESecret+ses.ID()+csrf.String())
+	stateStr, err := marshalOauthState(state, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf.String()))
 	if err != nil {
 		id, _ := uuid.NewRandom()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
@@ -246,7 +241,6 @@ func (h *OauthHandlers) HandleLogout(c *gin.Context) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-
 	// Try the revocation endpoint if there is one.
 	// Errors are ignored
 	if h.oauthRevocationUrl != "" {
@@ -257,12 +251,10 @@ func (h *OauthHandlers) HandleLogout(c *gin.Context) {
 			RevokeToken(h.oauthRevocationUrl, h.oauthClientID, h.oauthClientSecret, refreshToken, RefreshTokenKey)
 		}
 	}
-
 	ses.Delete(IDTokenKey)
 	ses.Delete(AccessTokenKey)
 	ses.Delete(RefreshTokenKey)
 	ses.Save()
-
 	c.Redirect(http.StatusTemporaryRedirect, h.oauthLogoutUrl)
 }
 
@@ -290,7 +282,7 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing state"})
 		return
 	}
-	state, err := unmarshalOauthState(stateStr, h.oauthPKCESecret+ses.ID()+csrf)
+	state, err := unmarshalOauthState(stateStr, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "state invalid. tampered?"})
 		return
@@ -389,16 +381,27 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 	}
 }
 
-// returns generate PKCE verifier (not encoded) and challenge (encoded)
+// returns generate PKCE verifier (plain, not encoded) and challenge (encoded)
 // According to section 7.1 of RFC7636, the verifier should have 256 bits of entropy,
-// so we use a 32 byte slice
+// so we use a 32 byte slice with random data.
+// For the S256 challenge, we are supposed to use this formula:
+//
+//	code_challenge = BASE64URL-ENCODE(SHA256(ASCII(code_verifier)
+//
+// The code_verifier needs to be transmitted.
+// Simply converting a random byte slice to ascii would result in transmitting
+// odd non-printing characters. To avoid that, my ASCII() function is instead
+// a second base64-url enoding. I'm returning the "plain" form since it's more compact.
+// This is the same thing done in https://cs.opensource.google/go/x/oauth2/+/refs/tags/v0.28.0:pkce.go
+// excpet I want the more compact "plain" form to be returned.
 func generatePKCE() ([]byte, string, error) {
 	plain := make([]byte, 32)
 	_, err := io.ReadFull(rand.Reader, plain)
 	if err != nil {
 		return nil, "", err
 	}
-	sum := sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(plain)))
+	verifier := base64.RawURLEncoding.EncodeToString(plain)
+	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	return plain, challenge, nil
 }
@@ -407,6 +410,11 @@ type oauthState struct {
 	NextUrl   *url.URL `json:"n"` // the URL we want to redirect to after login
 	PKCEPlain []byte   `json:"p"` // the PKCE verifier. This is a short-lived secret. You should encrypt before sending.
 	CSRF      string   `json:"c"` // bind the session CSRF the state
+}
+
+// encryption key to consist of secrets only we know and unique elements of the session.
+func oauthStatePassword(pkcesecret, sessionid, csrf string) string {
+	return pkcesecret + sessionid + csrf
 }
 
 // encode struct, encrypt, and urlencode.
@@ -474,16 +482,13 @@ func RevokeToken(revocationEndpoint, clientid, clientsecret, token, hint string)
 	values := url.Values{}
 	values.Set("token", token)
 	values.Set("token_type_hint", hint)
-
 	body := strings.NewReader(values.Encode())
-
 	req, err := http.NewRequest(http.MethodPost, revocationEndpoint, body)
 	if err != nil {
 		return err
 	}
 	req.SetBasicAuth(clientid, clientsecret)
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
