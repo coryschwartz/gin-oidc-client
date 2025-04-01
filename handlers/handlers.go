@@ -248,12 +248,13 @@ func (h *OauthHandlers) HandleLogout(c *gin.Context) {
 	})
 
 	// Try the revocation endpoint if there is one.
+	// Errors are ignored
 	if h.oauthRevocationUrl != "" {
 		if accessToken, ok := ses.Get(AccessTokenKey).(string); ok {
-			tryRevokeTokens(h.oauthRevocationUrl, h.oauthClientID, h.oauthClientSecret, accessToken, AccessTokenKey)
+			RevokeToken(h.oauthRevocationUrl, h.oauthClientID, h.oauthClientSecret, accessToken, AccessTokenKey)
 		}
 		if refreshToken, ok := ses.Get(RefreshTokenKey).(string); ok {
-			tryRevokeTokens(h.oauthRevocationUrl, h.oauthClientID, h.oauthClientSecret, refreshToken, RefreshTokenKey)
+			RevokeToken(h.oauthRevocationUrl, h.oauthClientID, h.oauthClientSecret, refreshToken, RefreshTokenKey)
 		}
 	}
 
@@ -467,8 +468,9 @@ func unmarshalOauthState(state, password string) (*oauthState, error) {
 }
 
 // RFC7009
+// RevokeToken
 // Authenticate with basic auth, Revoke a single token.
-func tryRevokeTokens(revocationEndpoint, clientid, clientsecret, token, hint string) error {
+func RevokeToken(revocationEndpoint, clientid, clientsecret, token, hint string) error {
 	values := url.Values{}
 	values.Set("token", token)
 	values.Set("token_type_hint", hint)
