@@ -32,7 +32,6 @@ func TestOauthStateMarshaling(t *testing.T) {
 	state := &oauthState{
 		NextUrl:   u,
 		PKCEPlain: pkce,
-		CSRF:      csrf,
 	}
 	marshaled, err := marshalOauthState(state, password)
 	assert.Nil(t, err, "marshaling the state should not produce an error")

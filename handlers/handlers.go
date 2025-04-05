@@ -195,7 +195,6 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 	state := &oauthState{
 		NextUrl:   nextUrl,
 		PKCEPlain: pkcePlain,
-		CSRF:      csrf,
 	}
 	stateStr, err := marshalOauthState(state, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf))
 	if err != nil {
@@ -282,14 +281,10 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "state invalid. tampered?"})
 		return
 	}
-
 	code := c.Query("code")
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing auth code"})
 		return
-	}
-	if state.CSRF != csrf {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CSRF forgery"})
 	}
 	// Compute the nonce using our challenge and browser session.
 	// If this is different than the nonce we generated in HandleLogin, the auth server should reject it.
@@ -411,7 +406,6 @@ func generatePKCE() ([]byte, string, error) {
 type oauthState struct {
 	NextUrl   *url.URL `json:"n"` // the URL we want to redirect to after login
 	PKCEPlain []byte   `json:"p"` // the PKCE verifier. This is a short-lived secret. You should encrypt before sending.
-	CSRF      string   `json:"c"` // bind the session CSRF the state
 }
 
 // encryption key to consist of secrets only we know and unique elements of the session.
