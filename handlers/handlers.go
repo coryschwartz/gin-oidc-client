@@ -9,15 +9,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 )
 
 const (
@@ -171,14 +172,8 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	csrf, err := uuid.NewRandom()
-	if err != nil {
-		id, _ := uuid.NewRandom()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
-		c.Error(fmt.Errorf("%s %w", id.String(), err))
-		return
-	}
-	ses.Set("csrf", csrf.String())
+	csrf := base64.RawURLEncoding.EncodeToString(random32())
+	ses.Set("csrf", csrf)
 	ses.Save()
 	pkcePlain, pkceChallenge, err := generatePKCE()
 	if err != nil {
@@ -200,9 +195,9 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 	state := &oauthState{
 		NextUrl:   nextUrl,
 		PKCEPlain: pkcePlain,
-		CSRF:      csrf.String(),
+		CSRF:      csrf,
 	}
-	stateStr, err := marshalOauthState(state, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf.String()))
+	stateStr, err := marshalOauthState(state, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf))
 	if err != nil {
 		id, _ := uuid.NewRandom()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
@@ -214,7 +209,7 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 	// to generate a nonce.
 	hash := sha256.New()
 	hash.Write(pkcePlain)
-	hash.Write([]byte(csrf.String()))
+	hash.Write([]byte(csrf))
 	nonce := base64.RawURLEncoding.EncodeToString(hash.Sum([]byte(ses.ID())))
 	url := h.oauth2config.AuthCodeURL(stateStr,
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
@@ -381,6 +376,17 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 	}
 }
 
+// utility function to generate a random 32-byte slice.
+// PKCE and CSRF use this function.
+func random32() []byte {
+	b := make([]byte, 32)
+	_, err := io.ReadFull(rand.Reader, b)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 // returns generate PKCE verifier (plain, not encoded) and challenge (encoded)
 // According to section 7.1 of RFC7636, the verifier should have 256 bits of entropy,
 // so we use a 32 byte slice with random data.
@@ -395,11 +401,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 // This is the same thing done in https://cs.opensource.google/go/x/oauth2/+/refs/tags/v0.28.0:pkce.go
 // excpet I want the more compact "plain" form to be returned.
 func generatePKCE() ([]byte, string, error) {
-	plain := make([]byte, 32)
-	_, err := io.ReadFull(rand.Reader, plain)
-	if err != nil {
-		return nil, "", err
-	}
+	plain := random32()
 	verifier := base64.RawURLEncoding.EncodeToString(plain)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
