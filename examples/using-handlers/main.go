@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"github.com/coryschwartz/gin-oidc-client/handlers"
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
+	"github.com/gin-contrib/sessions/memstore"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -27,7 +27,7 @@ var (
 func main() {
 	session_sign_key := sha256.Sum256([]byte(sessionSigning))
 	session_encryption_key := sha256.Sum256([]byte(sessionEncrypt))
-	sessionStore := cookie.NewStore(session_sign_key[:], session_encryption_key[:])
+	sessionStore := memstore.NewStore(session_sign_key[:], session_encryption_key[:])
 
 	engine := gin.Default()
 	engine.Use(sessions.SessionsMany([]string{oauthSessionName}, sessionStore))
