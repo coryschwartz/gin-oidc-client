@@ -270,6 +270,7 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 	csrf, ok := ses.Get("csrf").(string)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "csrf missing from session"})
+		return
 	}
 	stateStr := c.Query("state")
 	if stateStr == "" {
