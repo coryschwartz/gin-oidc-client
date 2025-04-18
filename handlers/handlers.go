@@ -174,12 +174,14 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 	})
 	csrf := base64.RawURLEncoding.EncodeToString(random32())
 	ses.Set("csrf", csrf)
-	ses.Save()
+	err := ses.Save()
+	if err != nil {
+		oops500(c, err)
+		return
+	}
 	pkcePlain, pkceChallenge, err := generatePKCE()
 	if err != nil {
-		id, _ := uuid.NewRandom()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
-		c.Error(fmt.Errorf("%s %w", id.String(), err))
+		oops500(c, err)
 		return
 	}
 	nextUrlEnc := c.Query("next")
@@ -198,9 +200,7 @@ func (h *OauthHandlers) HandleLogin(c *gin.Context) {
 	}
 	stateStr, err := marshalOauthState(state, oauthStatePassword(h.oauthPKCESecret, ses.ID(), csrf))
 	if err != nil {
-		id, _ := uuid.NewRandom()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
-		c.Error(fmt.Errorf("%s %w", id.String(), err))
+		oops500(c, err)
 		return
 	}
 	// PKCEPlain is known only to us.
@@ -248,7 +248,11 @@ func (h *OauthHandlers) HandleLogout(c *gin.Context) {
 	ses.Delete(IDTokenKey)
 	ses.Delete(AccessTokenKey)
 	ses.Delete(RefreshTokenKey)
-	ses.Save()
+	err := ses.Save()
+	if err != nil {
+		oops500(c, err)
+		// don't return for this error. We stil want to redirect the user to continue the logout process.
+	}
 	c.Redirect(http.StatusTemporaryRedirect, h.oauthLogoutUrl)
 }
 
@@ -299,6 +303,8 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed key exchange"})
+		// log this error, since it might be a problem with the auth server.
+		c.Error(fmt.Errorf("failed key exchange: %w", err))
 		return
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
@@ -320,7 +326,11 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 	ses.Set(AccessTokenKey, token.AccessToken)
 	ses.Set(RefreshTokenKey, token.RefreshToken)
 	ses.Delete("csrf")
-	ses.Save()
+	err = ses.Save()
+	if err != nil {
+		oops500(c, err)
+		return
+	}
 	c.Redirect(http.StatusTemporaryRedirect, state.NextUrl.String())
 }
 
@@ -346,6 +356,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		rawIDToken, ok := ses.Get(IDTokenKey).(string)
 		if !ok {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
+			c.JSON(http.StatusUnauthorized, gin.H{"notice": "Missing id_token. Please log in."})
 			c.Redirect(http.StatusTemporaryRedirect, loginUrl+"?next="+next)
 			c.Abort()
 			return
@@ -353,6 +364,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		idToken, err := h.verifier.Verify(c, rawIDToken)
 		if err != nil {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
+			c.JSON(http.StatusUnauthorized, gin.H{"notice": "Expired or invalid id_token. Please log in."})
 			c.Redirect(http.StatusTemporaryRedirect, loginUrl+"?next="+next)
 			c.Abort()
 			return
@@ -493,6 +505,14 @@ func RevokeToken(revocationEndpoint, clientid, clientsecret, token, hint string)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
-	fmt.Println(resp.Status)
 	return nil
+}
+
+// Report a 500 error to the user and log it.
+// The random UUID is to allow users to reference the error in support tickets
+// without leaking sensitive information.
+func oops500(c *gin.Context, err error) {
+	id, _ := uuid.NewRandom()
+	c.JSON(http.StatusInternalServerError, gin.H{"error": id.String()})
+	c.Error(fmt.Errorf("ID: %s Error: %w", id.String(), err))
 }
