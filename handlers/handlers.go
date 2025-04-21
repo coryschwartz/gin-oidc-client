@@ -369,6 +369,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 			c.Abort()
 			return
 		}
+		c.Set(IDTokenKey, rawIDToken)
 		c.Set(SubjectKey, idToken.Subject)
 		claim := make(map[string]any)
 		if err = idToken.Claims(&claim); err == nil {
