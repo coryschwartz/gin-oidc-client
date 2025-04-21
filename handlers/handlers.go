@@ -356,15 +356,19 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		rawIDToken, ok := ses.Get(IDTokenKey).(string)
 		if !ok {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
-			c.JSON(http.StatusUnauthorized, gin.H{"notice": "Missing id_token. Please log in."})
-			c.Redirect(http.StatusTemporaryRedirect, loginUrl+"?next="+next)
+			nexturl := loginUrl + "?next=" + next
+			c.Header("Content-Type", "text/html")
+			c.Writer.Write(fmt.Appendf([]byte{}, "Missing token. Please <a href=\"%s\">log in</a>.", nexturl))
+			c.Redirect(http.StatusTemporaryRedirect, nexturl)
 			c.Abort()
 			return
 		}
 		idToken, err := h.verifier.Verify(c, rawIDToken)
 		if err != nil {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
-			c.JSON(http.StatusUnauthorized, gin.H{"notice": "Expired or invalid id_token. Please log in."})
+			nexturl := loginUrl + "?next=" + next
+			c.Header("Content-Type", "text/html")
+			c.Writer.Write(fmt.Appendf([]byte{}, "Invalid token. Please <a href=\"%s\">log in</a>.", nexturl))
 			c.Redirect(http.StatusTemporaryRedirect, loginUrl+"?next="+next)
 			c.Abort()
 			return
