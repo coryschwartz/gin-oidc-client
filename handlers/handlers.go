@@ -357,8 +357,6 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		if !ok {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
 			nexturl := loginUrl + "?next=" + next
-			c.Header("Content-Type", "text/html")
-			c.Writer.Write(fmt.Appendf([]byte{}, "Missing token. Please <a href=\"%s\">log in</a>.", nexturl))
 			c.Redirect(http.StatusTemporaryRedirect, nexturl)
 			c.Abort()
 			return
@@ -367,9 +365,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		if err != nil {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
 			nexturl := loginUrl + "?next=" + next
-			c.Header("Content-Type", "text/html")
-			c.Writer.Write(fmt.Appendf([]byte{}, "Invalid token. Please <a href=\"%s\">log in</a>.", nexturl))
-			c.Redirect(http.StatusTemporaryRedirect, loginUrl+"?next="+next)
+			c.Redirect(http.StatusTemporaryRedirect, nexturl)
 			c.Abort()
 			return
 		}
