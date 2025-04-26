@@ -11,9 +11,9 @@ import (
 
 var (
 	// you need to replace at *least* these three variables.
-	oidcProvider      = ""
-	oauthClientID     = ""
-	oauthClientSecret = ""
+	oidcProvider      = "http://localhost:9000/application/o/payments/"
+	oauthClientID     = "3IN2uEu8oxQR7cMM251rakSsBHNjp1MhlvDWtMVy"
+	oauthClientSecret = "wzgoxbiwaoDH456Tvn0FsBiBMr6rKN3gZDeYC6S0ip0cbO8xpJYAqq7Cioe4GeWNxv8wrf6KVcpRd2l8PmzPf6vvZyTvKaudzFutP4hdhcKH6SkHanmJBX7gWmVFNXlM"
 
 	oauthRedirectUrl = "http://localhost:8080/oauth/redirect"
 	oauthLogoutUrl   = ""
@@ -68,8 +68,21 @@ func rootHandler(c *gin.Context) {
 }
 
 func userDetail(c *gin.Context) {
-	subject, _ := c.Get("subject")
-	claims, _ := c.Get("claims")
+	// Information about the user is stored in the session.
+	// If you know what keys to look for, you can get it directly, like this:
+	// subject, found := c.Get("subject")
+	// claims, found := c.Get("claims")
+	// You can also use the helper functions, which will comfortably cast the values for you.
+	subject, err := handlers.GetSubjectFromContext(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error getting subject: %v", err)
+		return
+	}
+	claims, err := handlers.GetClaimsFromContext(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error getting claims: %v", err)
+		return
+	}
 	c.IndentedJSON(http.StatusOK, gin.H{
 		"subject": subject,
 		"claims":  claims,
