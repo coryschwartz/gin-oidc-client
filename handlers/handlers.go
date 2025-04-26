@@ -385,6 +385,15 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 	}
 }
 
+// TokenSource
+// This is a helper function for returning a TokenSource tied to the oauth2 config.
+// Provided that you've got a valid refresh token, this function will return a TokenSource
+func (h *OauthHandlers) TokenSource(ctx context.Context, refreshToken string) oauth2.TokenSource {
+	return h.oauth2config.TokenSource(ctx, &oauth2.Token{
+		RefreshToken: refreshToken,
+	})
+}
+
 // utility function to generate a random 32-byte slice.
 // PKCE and CSRF use this function.
 func random32() []byte {
