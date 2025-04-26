@@ -171,7 +171,7 @@ func TestCSRFMitigation(t *testing.T) {
 	authServer := fakeOauthServer(t, redirect, clientId)
 	defer authServer.Close()
 	t.Logf("Starting auth server at %s", authServer.URL)
-	handlers := NewOauthHandlers(
+	handlers, err := NewOauthHandlers(
 		authServer.URL+"/oidc",
 		clientId,
 		"clientSecret123456",
@@ -181,6 +181,9 @@ func TestCSRFMitigation(t *testing.T) {
 		"loginSession",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("failed to create handlers: %v", err)
+	}
 	eng := gin.Default()
 	memsessions := cookie.NewStore(random32(), random32())
 	eng.Use(sessions.SessionsMany([]string{"loginSession"}, memsessions))

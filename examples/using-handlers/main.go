@@ -32,7 +32,7 @@ func main() {
 	engine := gin.Default()
 	engine.Use(sessions.SessionsMany([]string{oauthSessionName}, sessionStore))
 
-	oh := handlers.NewOauthHandlers(
+	oh, err := handlers.NewOauthHandlers(
 		oidcProvider,
 		oauthClientID,
 		oauthClientSecret,
@@ -42,6 +42,9 @@ func main() {
 		oauthSessionName,
 		oauthScopes,
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	// These three handlers  need to be setup for OAUTH to work.
 	engine.GET("/oauth/login", oh.HandleLogin)
