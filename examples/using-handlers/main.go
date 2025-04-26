@@ -11,9 +11,10 @@ import (
 
 var (
 	// you need to replace at *least* these three variables.
-	oidcProvider      = "http://localhost:9000/application/o/payments/"
-	oauthClientID     = "3IN2uEu8oxQR7cMM251rakSsBHNjp1MhlvDWtMVy"
-	oauthClientSecret = "wzgoxbiwaoDH456Tvn0FsBiBMr6rKN3gZDeYC6S0ip0cbO8xpJYAqq7Cioe4GeWNxv8wrf6KVcpRd2l8PmzPf6vvZyTvKaudzFutP4hdhcKH6SkHanmJBX7gWmVFNXlM"
+	// These are provided just as an example. Your actual values will come from your OIDC provider.
+	oidcProvider      = "http://localhost:9000/application/o/example/"
+	oauthClientID     = "IlGGjmXSFkQRyLphxoCM90aQtAx3i9X7Gk6GoOIY"
+	oauthClientSecret = "aGIKi0XYbUq7UKTfhUKOBIPpcoIfIDUeE7o0vp2aKNvj4foZ8UlYhU4xVxIDrHoxLkOfyA4vQtXy8CUEjCl1mHfD2RPmFgObjVoiiZKvZ5eANDxY29BM8BakHxsb7FcN"
 
 	oauthRedirectUrl = "http://localhost:8080/oauth/redirect"
 	oauthLogoutUrl   = ""
