@@ -14,6 +14,7 @@ type OauthHandlers struct {
 	oauthSessionName   string
 	oauth2config       *oauth2.Config
 	verifier           *oidc.IDTokenVerifier
+	oidcProvider       *oidc.Provider
 }
 
 // OauthHandlers holds the configuration used by an Oauth/Oidc Client.
@@ -82,6 +83,7 @@ func NewOauthHandlers(
 	if err != nil {
 		return nil, err
 	}
+	opts = append(opts, WithOidcProvider(provider))
 	claims := make(map[string]any)
 	provider.Claims(&claims)
 	if oauthLogoutUrl == "" {
@@ -165,6 +167,13 @@ func WithOauth2Config(oauth2config *oauth2.Config) OauthHandlersOption {
 func WithVerifier(verifier *oidc.IDTokenVerifier) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.verifier = verifier
+		return nil
+	}
+}
+
+func WithOidcProvider(oidcProvider *oidc.Provider) OauthHandlersOption {
+	return func(oh *OauthHandlers) error {
+		oh.oidcProvider = oidcProvider
 		return nil
 	}
 }

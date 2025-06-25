@@ -60,6 +60,7 @@ func main() {
 	protected.Use(oh.MiddlewareRequireLogin("/oauth/login"))
 
 	protected.GET("/whoami", userDetail)
+	protected.GET("/expensivewhoami", userInfo)
 
 	engine.Run(":8080")
 }
@@ -68,6 +69,8 @@ func rootHandler(c *gin.Context) {
 	c.Writer.Write([]byte("sup, nerds!"))
 }
 
+// This function shows information that is available after login automatically.
+// This function doesn't do any extra API calls to get the information.
 func userDetail(c *gin.Context) {
 	// Information about the user is stored in the session.
 	// If you know what keys to look for, you can get it directly, like this:
@@ -87,5 +90,24 @@ func userDetail(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, gin.H{
 		"subject": subject,
 		"claims":  claims,
+	})
+}
+
+// This function hits the userinfo endpoint of the OIDC provider.
+// This requires an additional API call to the auth provider, so it's not done automatically.
+func userInfo(c *gin.Context) {
+	info, err := handlers.UserInfoFromContext(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error getting userinfo: %v", err)
+		return
+	}
+	claimMap := make(map[string]any)
+	if err := info.Claims(&claimMap); err != nil {
+		c.String(http.StatusInternalServerError, "Error parsing userinfo claims: %v", err)
+		return
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"info":   info,
+		"claims": claimMap,
 	})
 }

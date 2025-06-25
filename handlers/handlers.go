@@ -37,6 +37,10 @@ const (
 	ClaimsKey = "claims"
 	// c.Get(SubjectKey) -> string
 	SubjectKey = "subject"
+	// c.Get("oidc_provider") -> *oidc.Provider
+	OIDCProviderKey = "oidc_provider"
+	// c.Get("oauth_config") -> *oauth2.Config
+	OAuthConfigKey = "oauth_config"
 )
 
 // HandleLogin
@@ -255,6 +259,8 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		}
 		c.Set(IDTokenKey, rawIDToken)
 		c.Set(SubjectKey, idToken.Subject)
+		c.Set(OIDCProviderKey, h.oidcProvider)
+		c.Set(OAuthConfigKey, h.oauth2config)
 		claim := make(map[string]any)
 		if err = idToken.Claims(&claim); err == nil {
 			c.Set(ClaimsKey, claim)
