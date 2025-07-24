@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 
+	"github.com/coryschwartz/gin-oidc-client/crypt"
+
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
@@ -15,6 +17,7 @@ type OauthHandlers struct {
 	oauth2config       *oauth2.Config
 	verifier           *oidc.IDTokenVerifier
 	oidcProvider       *oidc.Provider
+	decrypter          crypt.TokenDecrypter
 }
 
 // OauthHandlers holds the configuration used by an Oauth/Oidc Client.
@@ -114,6 +117,7 @@ func NewOauthHandlers(
 		ClientID: oauth2config.ClientID,
 	})
 	opts = append(opts, WithVerifier(verifier))
+	opts = append(opts, WithTokenDecrypter(&crypt.NullDecrypter{})) // Default to no JWE support.
 	return NewOauthHandlersWithOptions(opts...)
 }
 
@@ -174,6 +178,13 @@ func WithVerifier(verifier *oidc.IDTokenVerifier) OauthHandlersOption {
 func WithOidcProvider(oidcProvider *oidc.Provider) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oidcProvider = oidcProvider
+		return nil
+	}
+}
+
+func WithTokenDecrypter(decrypter crypt.TokenDecrypter) OauthHandlersOption {
+	return func(oh *OauthHandlers) error {
+		oh.decrypter = decrypter
 		return nil
 	}
 }

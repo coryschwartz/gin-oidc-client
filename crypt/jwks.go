@@ -2,6 +2,7 @@ package crypt
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -76,11 +77,62 @@ func NewJwksSetDecrypter(set jwk.Set) *JwksSetDecrypter {
 	}
 }
 
+// I'm keeping this function here, but I'm not able to use it with keys issued by some auth servers,
+// and I haven't yet figured out why.
+// This function works in tests, but in my real-world error case, I was able to lookp keys by index but not ID.
+
+// func (jcd *JwksSetDecrypter) DecryptToken(ctx context.Context, encToken []byte) ([]byte, error) {
+// 	decryptOpts := []jwe.DecryptOption{
+// 		jwe.WithKeySet(jcd.set),
+// 	}
+// 	return jwe.Decrypt(encToken, decryptOpts...)
+// }
+
 func (jcd *JwksSetDecrypter) DecryptToken(ctx context.Context, encToken []byte) ([]byte, error) {
-	decryptOpts := []jwe.DecryptOption{
-		jwe.WithKeySet(jcd.set),
+	// Parse the JWE to get the expected key ID and algorithm
+	msg, err := jwe.Parse(encToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWE: %w", err)
 	}
-	return jwe.Decrypt(encToken, decryptOpts...)
+
+	if len(msg.Recipients()) == 0 {
+		return nil, fmt.Errorf("JWE has no recipients")
+	}
+
+	recipient := msg.Recipients()[0]
+	expectedKid, ok := recipient.Headers().KeyID()
+	if !ok {
+		expectedKid = "" // No key ID specified, we will try all keys
+	}
+	algorithm, ok := recipient.Headers().Algorithm()
+	if !ok {
+		return nil, fmt.Errorf("JWE recipient has no Algorithm (alg)")
+	}
+
+	// Try to find the key by ID first
+	if expectedKid != "" {
+		if key, found := jcd.set.LookupKeyID(expectedKid); found {
+			result, err := jwe.Decrypt(encToken, jwe.WithKey(algorithm, key))
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt with matching key: %w", err)
+			}
+			return result, nil
+		}
+	}
+
+	// Fallback: try all keys by index until it works.
+	for i := range jcd.set.Len() {
+		key, ok := jcd.set.Key(i)
+		if !ok {
+			continue
+		}
+		result, err := jwe.Decrypt(encToken, jwe.WithKey(algorithm, key))
+		if err == nil {
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to decrypt with any available key (tried %d keys)", jcd.set.Len())
 }
 
 // HandleJWKS creates a Gin handler that serves the public keys from a JWK set

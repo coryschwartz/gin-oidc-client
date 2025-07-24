@@ -198,18 +198,31 @@ func (h *OauthHandlers) HandleRedirect(c *gin.Context) {
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing id_token"})
+		c.Error(fmt.Errorf("missing id_token in token response"))
 		return
 	}
-	idToken, err := h.verifier.Verify(context.Background(), rawIDToken)
+	// decrypt and verify the ID token so we can verify the nonce.
+	decIDToken, err := h.decrypter.DecryptToken(c, []byte(rawIDToken))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed id_token decryption"})
+		c.Error(fmt.Errorf("failed id_token decryption: %w", err))
+		return
+	}
+	idToken, err := h.verifier.Verify(c, string(decIDToken))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed id_token verification"})
+		c.Error(fmt.Errorf("failed id_token verification: %w", err))
 		return
 	}
 	// This ID Token should include our nonce. If it doesn't, something is fishy.
 	if idToken.Nonce != nonce {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nonce does not match"})
+		c.Error(fmt.Errorf("nonce does not match: %s != %s", idToken.Nonce, nonce))
 		return
 	}
+	// Store tokens in the session.
+	// If JWE encryption is used, we should store the encrypted tokens here since the session
+	// may be in plain view of the user.
 	ses.Set(IDTokenKey, rawIDToken)
 	ses.Set(AccessTokenKey, token.AccessToken)
 	ses.Set(RefreshTokenKey, token.RefreshToken)
@@ -241,7 +254,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 		})
-		rawIDToken, ok := ses.Get(IDTokenKey).(string)
+		encIDToken, ok := ses.Get(IDTokenKey).(string)
 		if !ok {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
 			nexturl := loginUrl + "?next=" + next
@@ -249,7 +262,13 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 			c.Abort()
 			return
 		}
-		idToken, err := h.verifier.Verify(c, rawIDToken)
+		decIDToken, err := h.decrypter.DecryptToken(c, []byte(encIDToken))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed id_token decryption"})
+			c.Error(fmt.Errorf("failed id_token decryption: %w", err))
+			return
+		}
+		idToken, err := h.verifier.Verify(c, string(decIDToken))
 		if err != nil {
 			next := base64.RawURLEncoding.EncodeToString([]byte(c.Request.URL.String()))
 			nexturl := loginUrl + "?next=" + next
@@ -257,7 +276,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 			c.Abort()
 			return
 		}
-		c.Set(IDTokenKey, rawIDToken)
+		c.Set(IDTokenKey, decIDToken)
 		c.Set(SubjectKey, idToken.Subject)
 		c.Set(OIDCProviderKey, h.oidcProvider)
 		c.Set(OAuthConfigKey, h.oauth2config)
@@ -265,11 +284,13 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 		if err = idToken.Claims(&claim); err == nil {
 			c.Set(ClaimsKey, claim)
 		}
-		if accessToken, ok := ses.Get(AccessTokenKey).(string); ok {
-			c.Set(AccessTokenKey, accessToken)
+		if encAccessToken, ok := ses.Get(AccessTokenKey).(string); ok {
+			accessToken, _ := h.decrypter.DecryptToken(c, []byte(encAccessToken))
+			c.Set(AccessTokenKey, string(accessToken))
 		}
-		if refreshToken, ok := ses.Get(RefreshTokenKey).(string); ok {
-			c.Set(RefreshTokenKey, refreshToken)
+		if encRefreshToken, ok := ses.Get(RefreshTokenKey).(string); ok {
+			refreshToken, _ := h.decrypter.DecryptToken(c, []byte(encRefreshToken))
+			c.Set(RefreshTokenKey, string(refreshToken))
 		}
 		c.Next()
 	}
