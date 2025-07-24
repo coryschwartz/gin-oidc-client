@@ -1,1 +1,3 @@
 .env
+examples/jwe-encryption/cert.pem
+examples/jwe-encryption/private.key
