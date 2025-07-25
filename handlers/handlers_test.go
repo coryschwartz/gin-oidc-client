@@ -176,10 +176,12 @@ func TestCSRFMitigation(t *testing.T) {
 		clientId,
 		"clientSecret123456",
 		redirect,
-		"http://example.com/logout",
-		"pkceSecret",
-		"loginSession",
 		nil,
+		[]OauthHandlersOption{
+			WithOauthLogoutUrl("http://example.com/logout"),
+			WithOauthPKCESecret("pkceSecret"),
+			WithOauthSessionName("loginSession"),
+		}...,
 	)
 	if err != nil {
 		t.Fatalf("failed to create handlers: %v", err)

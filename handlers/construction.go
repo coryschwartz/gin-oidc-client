@@ -41,26 +41,6 @@ type OauthHandlers struct {
 //	the same URL. It should be set to the URL where users can connect to your application where the
 //	HandleRedirect handler is listening.
 //
-// oauthLogoutUrl:
-//
-//	Where should users go after they log out? Check if your oauth provider has a logout endpoint.
-//	If they do, you should set that URL here. If set to an empty string, I'll try to figure it out
-//	using the openidc provider metadata. No promises.
-//
-// oauthPKCESecret:
-//
-//	PKCE (RFC7636) is a good security practice. The general idea is that in the first Oauth phase,
-//	we pass a hash sum to the auth server. Then, when we do token exchange we pass the original data.
-//	The auth server can then know that both requests came from the same place. Generally, you have to
-//	store this data somehow. In this implementation, we are stuffing this data into the state and
-//	encrypting it. This is the encryption key. This is an implementation detail.
-//
-// oauthSessionName:
-//
-//	We're using gin-contrib/sessions to store the oidc idtoken and other data to the session. You should
-//	create a session using whatever storage medium you wish. Use encryption if able. Use this variable
-//	to tell us which session you want login information to be stored.
-//
 // oauthScopes:
 //
 //	A list of scopes we should request the auth server to send us. Just because you request it, doesn't
@@ -68,20 +48,25 @@ type OauthHandlers struct {
 //	available. When you add additional scopes, the auth server will return additional claims
 //	during token exchange. The content of the claims are various. If you use the MiddlewareRequireLogin,
 //	you will find the claims are made available as a gin context value.
+// 	by default, the openid scope is added to the list of scopes.
+
 func NewOauthHandlers(
 	oidcProvider,
 	oauthClientID,
 	oauthClientSecret,
-	oauthRedirectUrl,
-	oauthLogoutUrl,
-	oauthPKCESecret,
-	oauthSessionName string,
-	oauthScopes []string) (*OauthHandlers, error) {
+	oauthRedirectUrl string,
+	oauthScopes []string,
+	addlOptions ...OauthHandlersOption) (*OauthHandlers, error) {
 
+	// default options
 	opts := []OauthHandlersOption{
-		WithOauthSessionName(oauthSessionName),
-		WithOauthPKCESecret(oauthPKCESecret),
+		WithOauthSessionName("login"),              // name of the gin-contrib/sessions session where information is stored.
+		WithOauthPKCESecret(oauthClientSecret),     // pkce state encryption, same as the client secret by default.
+		WithTokenDecrypter(&crypt.NullDecrypter{}), // no JWE decryption by default
 	}
+
+	// connect to the OIDC provider and get some information from it.
+	// This does a network call to the discovery url.
 	provider, err := oidc.NewProvider(context.Background(), oidcProvider)
 	if err != nil {
 		return nil, err
@@ -89,22 +74,22 @@ func NewOauthHandlers(
 	opts = append(opts, WithOidcProvider(provider))
 	claims := make(map[string]any)
 	provider.Claims(&claims)
-	if oauthLogoutUrl == "" {
-		// This key is *not* in the documented provider metadata
-		// https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata
-		// However, sometimes it is used.
-		if val, ok := claims["end_session_endpoint"].(string); ok {
-			oauthLogoutUrl = val
-		} else {
-			oauthLogoutUrl = "/"
-		}
+
+	// maybe there is a logout endpoint.
+	oauthLogoutUrl := "/"
+	if val, ok := claims["end_session_endpoint"].(string); ok {
+		oauthLogoutUrl = val
 	}
 	opts = append(opts, WithOauthLogoutUrl(oauthLogoutUrl))
-	// Sometimes, there is a revocation endpoint. Sometimes.
-	// This endpoint can be used to revoke individual tokens.
+
+	// maybe there is a revocation endpoint.
+	tokenRevocationUrl := ""
 	if val, ok := claims["revocation_endpoint"].(string); ok {
-		opts = append(opts, WithOauthRevocationUrl(val))
+		tokenRevocationUrl = val
 	}
+	opts = append(opts, WithOauthRevocationUrl(tokenRevocationUrl))
+
+	// oauth
 	oauth2config := &oauth2.Config{
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
@@ -113,14 +98,18 @@ func NewOauthHandlers(
 		Scopes:       append([]string{oidc.ScopeOpenID}, oauthScopes...),
 	}
 	opts = append(opts, WithOauth2Config(oauth2config))
+
+	// oidc
 	verifier := provider.Verifier(&oidc.Config{
 		ClientID: oauth2config.ClientID,
 	})
 	opts = append(opts, WithVerifier(verifier))
-	opts = append(opts, WithTokenDecrypter(&crypt.NullDecrypter{})) // Default to no JWE support.
-	return NewOauthHandlersWithOptions(opts...)
+
+	return NewOauthHandlersWithOptions(append(opts, addlOptions...)...)
 }
 
+// NewOauthHandlersWithOptions creates a new OauthHandlers with the provided options.
+// If you use this function, be aware that some options are required for proper functionality.
 func NewOauthHandlersWithOptions(opts ...OauthHandlersOption) (*OauthHandlers, error) {
 	oh := new(OauthHandlers)
 	for _, opt := range opts {
@@ -133,6 +122,8 @@ func NewOauthHandlersWithOptions(opts ...OauthHandlersOption) (*OauthHandlers, e
 
 type OauthHandlersOption (func(*OauthHandlers) error)
 
+// WithOauthLogoutURL
+// Where should users go after they log out? Check if your oauth provider has a logout endpoint.
 func WithOauthLogoutUrl(logoutUrl string) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oauthLogoutUrl = logoutUrl
@@ -140,6 +131,8 @@ func WithOauthLogoutUrl(logoutUrl string) OauthHandlersOption {
 	}
 }
 
+// WithOauthRevocationUrl
+// What URL should we use to revoke access tokens? Check if your oauth provider has a revocation endpoint.
 func WithOauthRevocationUrl(revocationUrl string) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oauthRevocationUrl = revocationUrl
@@ -147,6 +140,12 @@ func WithOauthRevocationUrl(revocationUrl string) OauthHandlersOption {
 	}
 }
 
+// WithOauthPKCESecret
+// PKCE (RFC7636) is a good security practice. The general idea is that in the first Oauth phase,
+// we pass a hash sum to the auth server. Then, when we do token exchange we pass the original data.
+// The auth server can then know that both requests came from the same place. Generally, you have to
+// store this data somehow. In this implementation, we are stuffing this data into the state and
+// encrypting it. This is the encryption key. If not set, encryption may include
 func WithOauthPKCESecret(pkcesecret string) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oauthPKCESecret = pkcesecret
@@ -154,6 +153,10 @@ func WithOauthPKCESecret(pkcesecret string) OauthHandlersOption {
 	}
 }
 
+// WithOauthSessionName
+// We're using gin-contrib/sessions to store the oidc idtoken and other data to the session. You should
+// create a session using whatever storage medium you wish. Use encryption if able. Use this variable
+// to tell us which session you want login information to be stored.
 func WithOauthSessionName(sessionName string) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oauthSessionName = sessionName
@@ -161,6 +164,10 @@ func WithOauthSessionName(sessionName string) OauthHandlersOption {
 	}
 }
 
+// WithOauth2Config
+// Provide your own oauth2.Config
+// If you use this option, you will probably also want to use
+// WithVerifier and WithOidcProvider options.
 func WithOauth2Config(oauth2config *oauth2.Config) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oauth2config = oauth2config
@@ -168,6 +175,10 @@ func WithOauth2Config(oauth2config *oauth2.Config) OauthHandlersOption {
 	}
 }
 
+// WithVerifier
+// Provide your own oidc.IDTokenVerifier.
+// If you use this option, you will probably also want to use
+// WithOauth2Config and WithOidcProvider options.
 func WithVerifier(verifier *oidc.IDTokenVerifier) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.verifier = verifier
@@ -175,6 +186,10 @@ func WithVerifier(verifier *oidc.IDTokenVerifier) OauthHandlersOption {
 	}
 }
 
+// WithOidcProvider
+// Provide your own oidc.Provider
+// If you use this option, you will probably also want to use
+// WithOauth2Config and WithVerifier options.
 func WithOidcProvider(oidcProvider *oidc.Provider) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.oidcProvider = oidcProvider
@@ -182,6 +197,8 @@ func WithOidcProvider(oidcProvider *oidc.Provider) OauthHandlersOption {
 	}
 }
 
+// WithTokenDecrypter
+// Provide your own crypt.TokenDecrypter to decrypt JWE tokens
 func WithTokenDecrypter(decrypter crypt.TokenDecrypter) OauthHandlersOption {
 	return func(oh *OauthHandlers) error {
 		oh.decrypter = decrypter
