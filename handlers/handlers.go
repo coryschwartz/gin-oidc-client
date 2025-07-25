@@ -276,7 +276,7 @@ func (h *OauthHandlers) MiddlewareRequireLogin(loginUrl string) gin.HandlerFunc 
 			c.Abort()
 			return
 		}
-		c.Set(IDTokenKey, decIDToken)
+		c.Set(IDTokenKey, string(decIDToken))
 		c.Set(SubjectKey, idToken.Subject)
 		c.Set(OIDCProviderKey, h.oidcProvider)
 		c.Set(OAuthConfigKey, h.oauth2config)

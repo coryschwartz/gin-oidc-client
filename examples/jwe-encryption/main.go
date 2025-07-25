@@ -1,13 +1,11 @@
 package main
 
 import (
-	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"github.com/coreos/go-oidc/v3/oidc"
-	"golang.org/x/oauth2"
+	"io"
 	"os"
 
 	"crypto/sha256"
@@ -41,16 +39,15 @@ var (
 	oauthClientID     = "YOC27qqLBmtmInrCc2ueoHwgVzZDAU5PcH0uwpBx"
 	oauthClientSecret = "qlPpK3FOMCPcBXuaZ033TBkwmeWTgdHrh60MPZlgPRxICPYbNHlUNHzaBqCQ65CrNvBkRaRCWpKLWs6Umr4MXHvYPaO6DKLJQr8nKcJYIuiMmW9lzPsxGOD23eBr3eM7"
 
-	// Where is my key?
+	// Where is my JWE key?
 	JweKeyLocation = "./private.key"
 
 	oauthRedirectUrl = "http://localhost:8080/oauth/redirect"
-	oauthLogoutUrl   = ""
-	oauthPKCESecret  = "some junk"
-	oauthSessionName = "login"
 	oauthScopes      = []string{"profile", "email"}
-	sessionSigning   = "some more junk"
-	sessionEncrypt   = "even more junk"
+
+	pkceEncryption = "some junk"
+	sessionSigning = "some more junk"
+	sessionEncrypt = "even more junk"
 )
 
 func main() {
@@ -59,7 +56,7 @@ func main() {
 	sessionStore := memstore.NewStore(session_sign_key[:], session_encryption_key[:])
 
 	engine := gin.Default()
-	engine.Use(sessions.SessionsMany([]string{oauthSessionName}, sessionStore))
+	engine.Use(sessions.SessionsMany([]string{"login"}, sessionStore))
 
 	// open JweKeyLocation and create an rsa private key
 	key, err := readRSAPrivateKeyFromFile(JweKeyLocation)
@@ -78,34 +75,19 @@ func main() {
 		panic(err)
 	}
 
-	provider, err := oidc.NewProvider(context.Background(), oidcProvider)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create OIDC provider: %v", err))
-	}
-	verifier := provider.Verifier(&oidc.Config{
-		ClientID: oauthClientID,
-	})
-
 	// Create oauth handlers including our decrypter.
-	opts := []handlers.OauthHandlersOption{
-		handlers.WithOauth2Config(&oauth2.Config{
-			ClientID:     oauthClientID,
-			ClientSecret: oauthClientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  provider.Endpoint().AuthURL,
-				TokenURL: provider.Endpoint().TokenURL,
-			},
-			RedirectURL: oauthRedirectUrl,
-			Scopes:      append([]string{oidc.ScopeOpenID}, oauthScopes...),
-		}),
-		handlers.WithOauthLogoutUrl("http://localhost:9000/application/o/example/end-session/"),
-		handlers.WithOauthSessionName(oauthSessionName),
-		handlers.WithOauthPKCESecret(oauthPKCESecret),
-		handlers.WithOidcProvider(provider),
-		handlers.WithVerifier(verifier),
-		handlers.WithTokenDecrypter(jwksDec), // <-------don't forget!
-	}
-	oh, err := handlers.NewOauthHandlersWithOptions(opts...)
+	oh, err := handlers.NewOauthHandlers(
+		oidcProvider,
+		oauthClientID,
+		oauthClientSecret,
+		oauthRedirectUrl,
+		oauthScopes,
+		[]handlers.OauthHandlersOption{
+			handlers.WithTokenDecrypter(jwksDec), // <-------this is new, don't forget.
+
+		}...,
+	)
+
 	if err != nil {
 		panic(err)
 	}
@@ -118,7 +100,7 @@ func main() {
 	// Unprotected area
 	engine.GET("/", rootHandler)
 
-	// JWKS endpoint. public keys on display.
+	// JWKS endpoint. public keys on display. Optional.
 	engine.GET("/.well-known/jwks.json", jwksDec.HandleJWKS)
 
 	// login-only area
@@ -134,8 +116,11 @@ func rootHandler(c *gin.Context) {
 	c.Writer.Write([]byte("sup, nerds!"))
 }
 
-// This function shows information that is available after login automatically.
-// This function doesn't do any extra API calls to get the information.
+// notice that we are behind the encryption in this gin handler.
+// That is, we have access to the plain-text access token and ID token.
+// If you are watching in your browser developer tools, you'll notice that the encrypted tokens are transmitted
+// over the wire and they remain in the encrypted form even in the session storage.
+// But here, in the gin handler, we have access to it just like if they were not encrypted.
 func userDetail(c *gin.Context) {
 	// Information about the user is stored in the session.
 	// If you know what keys to look for, you can get it directly, like this:
@@ -152,14 +137,28 @@ func userDetail(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Error getting claims: %v", err)
 		return
 	}
+	accessToken, err := handlers.GetAccessTokenStringFromContext(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error getting access token: %v", err)
+		return
+	}
+	idToken, err := handlers.GetIDTokenStringFromContext(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error getting ID token: %v", err)
+		return
+	}
+
 	c.IndentedJSON(http.StatusOK, gin.H{
-		"subject": subject,
-		"claims":  claims,
+		"subject":     subject,
+		"claims":      claims,
+		"plainId":     accessToken,
+		"plainAccess": idToken,
 	})
 }
 
 // the provided make-self-signed-cert.sh creates a private key that you can likely copy to your
 // auth server. This function reads the private key and creates creates a *crypto/rsa.PrivateKey
+// Don't use this function in a serious environment; please load your keys properly.
 func readRSAPrivateKeyFromFile(filePath string) (*rsa.PrivateKey, error) {
 	// Step 1: Read the PEM file
 	file, err := os.Open(filePath)
@@ -168,14 +167,7 @@ func readRSAPrivateKeyFromFile(filePath string) (*rsa.PrivateKey, error) {
 	}
 	defer file.Close()
 
-	// Read all bytes from the file
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	fileBytes := make([]byte, fileInfo.Size())
-	_, err = file.Read(fileBytes)
+	fileBytes, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}

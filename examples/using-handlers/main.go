@@ -13,16 +13,14 @@ var (
 	// you need to replace at *least* these three variables.
 	// These are provided just as an example. Your actual values will come from your OIDC provider.
 	oidcProvider      = "http://localhost:9000/application/o/example/"
-	oauthClientID     = "IlGGjmXSFkQRyLphxoCM90aQtAx3i9X7Gk6GoOIY"
-	oauthClientSecret = "aGIKi0XYbUq7UKTfhUKOBIPpcoIfIDUeE7o0vp2aKNvj4foZ8UlYhU4xVxIDrHoxLkOfyA4vQtXy8CUEjCl1mHfD2RPmFgObjVoiiZKvZ5eANDxY29BM8BakHxsb7FcN"
+	oauthClientID     = "YOC27qqLBmtmInrCc2ueoHwgVzZDAU5PcH0uwpBx"
+	oauthClientSecret = "qlPpK3FOMCPcBXuaZ033TBkwmeWTgdHrh60MPZlgPRxICPYbNHlUNHzaBqCQ65CrNvBkRaRCWpKLWs6Umr4MXHvYPaO6DKLJQr8nKcJYIuiMmW9lzPsxGOD23eBr3eM7"
 
 	oauthRedirectUrl = "http://localhost:8080/oauth/redirect"
-	oauthLogoutUrl   = ""
-	oauthPKCESecret  = "some junk"
-	oauthSessionName = "login"
 	oauthScopes      = []string{"profile", "email"}
-	sessionSigning   = "some more junk"
-	sessionEncrypt   = "even more junk"
+
+	sessionSigning = "some more junk"
+	sessionEncrypt = "even more junk"
 )
 
 func main() {
@@ -31,16 +29,13 @@ func main() {
 	sessionStore := memstore.NewStore(session_sign_key[:], session_encryption_key[:])
 
 	engine := gin.Default()
-	engine.Use(sessions.SessionsMany([]string{oauthSessionName}, sessionStore))
+	engine.Use(sessions.SessionsMany([]string{"login"}, sessionStore))
 
 	oh, err := handlers.NewOauthHandlers(
 		oidcProvider,
 		oauthClientID,
 		oauthClientSecret,
 		oauthRedirectUrl,
-		oauthLogoutUrl,
-		oauthPKCESecret,
-		oauthSessionName,
 		oauthScopes,
 	)
 	if err != nil {
